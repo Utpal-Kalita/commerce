@@ -1,16 +1,18 @@
 from django.contrib.auth import authenticate, login, logout
 from django.db import IntegrityError
 from django.http import HttpResponse, HttpResponseRedirect
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from .forms import ListingForm
-from .models import User, Listing
+from .models import User, Listing, Bid
 from django.contrib.auth.decorators import login_required
+from django.contrib import messages
 
 def index(request):
     active_listings = Listing.objects.filter(isActive=True)
+    
     return render(request, "auctions/index.html", {
-        "listings": active_listings
+        "listings": active_listings,
     })
 
 
@@ -82,6 +84,120 @@ def create_listing(request):
             "form":form
         })
 
-def listing(request, id):
+def listing_view(request, id):
     listing_obj = get_object_or_404(Listing, pk=id)
-    comments = listing_obj.
+    comments = listing_obj.listing_comments.all()
+
+    highest_bid = listing_obj.listing_bids.order_by('-amount').first()
+
+    if highest_bid:
+        current_price = highest_bid.amount
+    else:
+        current_price = listing_obj.starting_bid
+
+    is_watching = False
+    if request.user.is_authenticated:
+        if listing_obj.watchlist.filter(id=request.user.id).exists():
+            is_watching = True
+
+    return render(request, "auctions/listing.html",{
+        "listing": listing_obj,
+        "comments": comments,
+        "current_price": current_price,
+        "highest_bid": highest_bid,
+        "starting_bid": listing_obj.starting_bid,
+        "is_watching": is_watching
+
+
+    })
+
+@login_required
+def place_bid(request, id):
+
+    if request.method != "POST":
+        return redirect("listing", id=id)
+
+
+    listing_obj = get_object_or_404(Listing, pk=id)
+    highest_bid = listing_obj.listing_bids.order_by('-amount').first()
+
+    current_price = highest_bid.amount if highest_bid else listing_obj.starting_bid
+
+    try:
+        bid_amount = float(request.POST['bid'])
+    except (TypeError, ValueError):
+        messages.error(request, "Invalid bid amount.")
+        return redirect("listing", id=id)
+
+    if bid_amount > current_price:
+        Bid.objects.create (
+            user= request.user,
+            listing = listing_obj,
+            amount = bid_amount
+        )
+
+        messages.success(request, "Bid placed successfully!")
+
+    else:
+        messages.error(request, "Bid must be higher than current price.")
+
+    return redirect("listing", id=id)
+
+
+def toggle_watchlist(request, id):
+    # Kick out users who aren't logged in
+    if not request.user.is_authenticated:
+        return HttpResponseRedirect(reverse("login"))
+    
+    listing_obj = get_object_or_404(Listing, pk=id)
+
+    if listing_obj.watchlist.filter(id=request.user.id).exists():
+        listing_obj.watchlist.remove(request.user)
+    else:
+        listing_obj.watchlist.add(request.user)
+    return redirect ("listing", id=id)
+
+
+@login_required
+def close_auction(request, id):
+
+    if request.method != "POST":
+        return redirect("listing", id=id)
+
+    listing_obj = get_object_or_404(Listing, pk=id)
+
+    # Already closed
+    if not listing_obj.isActive:
+        messages.error(request, "Auction is already closed.")
+        return redirect("listing", id=id)
+
+    # Only owner can close
+    if listing_obj.owner != request.user:
+        messages.error(request, "You are not allowed to close this auction.")
+        return redirect("listing", id=id)
+
+    highest_bid = listing_obj.listing_bids.order_by('-amount').first()
+
+    listing_obj.isActive = False
+
+    if highest_bid:
+        listing_obj.winner = highest_bid.user
+        messages.success(request, "Auction closed. Winner selected.")
+    else:
+        messages.info(request, "Auction closed. No bids were placed.")
+
+    listing_obj.save()
+
+    return redirect("listing", id=id)
+
+
+@login_required
+def watchlist_view(request):
+    listings = request.user.watchlist_listings.all()
+    return render(request, "watchlist.html",{
+        "listings": listings,
+
+    })
+
+
+
