@@ -4,7 +4,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from .forms import ListingForm
-from .models import User, Listing, Bid
+from .models import User, Listing, Bid, Category, Comment
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 
@@ -70,23 +70,21 @@ def register(request):
 @login_required
 def create_listing(request):
     if request.method == "POST":
-      form = ListingForm(request.POST)
-
-      if form.is_valid():
-        listing = form.save(commit=False)
-        listing.owner = request.user
-
-        listing.save()
-        return HttpResponseRedirect(reverse("index"))
+        form = ListingForm(request.POST)
+        if form.is_valid():
+            listing = form.save(commit=False)
+            listing.owner = request.user
+            listing.save()
+            return HttpResponseRedirect(reverse("index"))
     else:
         form = ListingForm()
-        return render (request, "auctions/create.html",{
-            "form":form
-        })
+    return render(request, "auctions/create.html", {
+        "form": form
+    })
 
 def listing_view(request, id):
     listing_obj = get_object_or_404(Listing, pk=id)
-    comments = listing_obj.listing_comments.all()
+    comments = listing_obj.listing_comments.order_by("-created_at")
 
     highest_bid = listing_obj.listing_bids.order_by('-amount').first()
 
@@ -129,17 +127,22 @@ def place_bid(request, id):
         messages.error(request, "Invalid bid amount.")
         return redirect("listing", id=id)
 
-    if bid_amount > current_price:
-        Bid.objects.create (
-            user= request.user,
-            listing = listing_obj,
-            amount = bid_amount
+    if highest_bid and bid_amount > float(current_price):
+        Bid.objects.create(
+            user=request.user,
+            listing=listing_obj,
+            amount=bid_amount
         )
-
         messages.success(request, "Bid placed successfully!")
-
+    elif not highest_bid and bid_amount >= float(listing_obj.starting_bid):
+        Bid.objects.create(
+            user=request.user,
+            listing=listing_obj,
+            amount=bid_amount
+        )
+        messages.success(request, "Bid placed successfully!")
     else:
-        messages.error(request, "Bid must be higher than current price.")
+        messages.error(request, "Bid must be at least the starting bid, and higher than any existing bids.")
 
     return redirect("listing", id=id)
 
@@ -199,5 +202,38 @@ def watchlist_view(request):
 
     })
 
+def category_view(request):
+    categories = Category.objects.all()
+
+    return render(request, "category.html", {
+        "categories": categories
+    })
+
+def category_listings(request, category_id):
+    category = get_object_or_404(Category, pk=category_id)
+    listings = category.category_listings.filter(isActive=True)
+
+    return render(request, "category_list.html", {
+        "category": category,
+        "listings": listings
+})
 
 
+@login_required
+def add_comment(request,id):
+    if request.method != "POST":
+        return redirect (
+            "listing", id = id
+            )
+    listing_obj = get_object_or_404(Listing, pk=id)
+    content = request.POST.get("comment")
+
+    if content:
+        Comment.objects.create(
+            content=content,
+            user=request.user,
+            listing=listing_obj
+        )
+    else:
+        messages.error(request, "Comment cannot be empty.")
+    return redirect("listing", id=id)
