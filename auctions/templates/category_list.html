@@ -1,0 +1,37 @@
+{% extends "auctions/layout.html" %}
+
+{% block body %}
+
+<h2>{{ category.category_name }}</h2>
+
+<div class="row">
+
+    {% for listing in listings %}
+        <div class="col-md-4">
+
+            <div class="card mb-4">
+
+                {% if listing.img_url %}
+                    <img src="{{ listing.img_url }}" class="card-img-top">
+                {% endif %}
+
+                <div class="card-body">
+                    <h5>{{ listing.title }}</h5>
+                    <p>{{ listing.description|truncatewords:15 }}</p>
+
+                    <a href="{% url 'listing' listing.id %}" class="btn btn-primary">
+                        View Listing
+                    </a>
+                </div>
+
+            </div>
+
+        </div>
+
+    {% empty %}
+        <p>No active listings in this category.</p>
+    {% endfor %}
+
+</div>
+
+{% endblock %}
